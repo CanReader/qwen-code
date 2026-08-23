@@ -15724,6 +15724,10 @@ describe('QwenAgent extMethod renameSession routing', () => {
       },
     );
 
+    // The seeded name is the caller's generic panel placeholder, and the
+    // first-prompt rename carries `titleSource: 'auto'`; seeding 'manual'
+    // would let the manual→auto downgrade guard discard that rename
+    // (#8977).
     expect(sessionService.forkSession).toHaveBeenCalledWith(
       liveSessionId,
       expect.any(String),
@@ -15733,7 +15737,7 @@ describe('QwenAgent extMethod renameSession routing', () => {
           sourceId: liveSessionId,
         },
         title: 'Side task',
-        titleSource: 'manual',
+        titleSource: 'auto',
       },
     );
     expect(recording.runWithWriteBarrier).toHaveBeenCalledOnce();
@@ -15742,7 +15746,7 @@ describe('QwenAgent extMethod renameSession routing', () => {
     expect(result).toMatchObject({
       title: 'Side task',
       displayName: 'Side task',
-      titleSource: 'manual',
+      titleSource: 'auto',
     });
 
     mockConnectionState.resolve();

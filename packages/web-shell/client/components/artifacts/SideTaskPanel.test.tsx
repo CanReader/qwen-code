@@ -644,3 +644,105 @@ it('bounds first-prompt title retries and reports the final failure', async () =
   );
   expect(onError).toHaveBeenCalledWith(failure, 'Failed to name side task');
 });
+
+it('does not mark the first-prompt title complete when the daemon keeps the prior name', async () => {
+  connection.sessionId = 'side-session-1';
+  connection.status = 'connected';
+  // Simulates the daemon's manual→auto downgrade guard discarding the
+  // rename: the request resolves 200 but answers with the previous
+  // effective fields instead of the requested title (#8977).
+  renameSession.mockResolvedValue({
+    displayName: 'Side task',
+    titleSource: 'manual',
+  });
+  container = document.createElement('div');
+  document.body.appendChild(container);
+  root = createRoot(container);
+
+  const onTitleChange = vi.fn();
+  const onError = vi.fn();
+  act(() => {
+    renderSideTask({
+      tabId: 'side-task:draft:1',
+      shouldNameFromFirstPrompt: true,
+      onTitleChange,
+      onError,
+    });
+  });
+
+  await act(async () => {
+    (
+      latestChatPaneProps.current?.['onFirstPromptAdmitted'] as (
+        text: string,
+      ) => void
+    )('Investigate discarded rename');
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+  expect(renameSession).toHaveBeenCalledTimes(3);
+  expect(renameSession).toHaveBeenCalledWith('Investigate discarded rename', {
+    titleSource: 'auto',
+  });
+  expect(catalogController.renamed).not.toHaveBeenCalled();
+  expect(catalogController.invalidateWorkspace).toHaveBeenCalledWith(
+    '/work/project',
+  );
+  expect(onTitleChange).not.toHaveBeenCalledWith(
+    'side-task:draft:1',
+    'Investigate discarded rename',
+    true,
+  );
+  expect(onError).toHaveBeenCalledWith(
+    expect.objectContaining({
+      message: expect.stringContaining('Rename was not applied'),
+    }),
+    'Failed to name side task',
+  );
+});
+
+it('marks the first-prompt title complete when the daemon echoes the new name', async () => {
+  connection.sessionId = 'side-session-1';
+  connection.status = 'connected';
+  renameSession.mockResolvedValue({
+    displayName: 'Investigate echoed rename',
+    titleSource: 'auto',
+  });
+  container = document.createElement('div');
+  document.body.appendChild(container);
+  root = createRoot(container);
+
+  const onTitleChange = vi.fn();
+  const onError = vi.fn();
+  act(() => {
+    renderSideTask({
+      tabId: 'side-task:draft:1',
+      shouldNameFromFirstPrompt: true,
+      onTitleChange,
+      onError,
+    });
+  });
+
+  await act(async () => {
+    (
+      latestChatPaneProps.current?.['onFirstPromptAdmitted'] as (
+        text: string,
+      ) => void
+    )('Investigate echoed rename');
+    await Promise.resolve();
+  });
+
+  expect(renameSession).toHaveBeenCalledTimes(1);
+  expect(catalogController.renamed).toHaveBeenCalledWith(
+    '/work/project',
+    'side-session-1',
+    'Investigate echoed rename',
+  );
+  expect(onTitleChange).toHaveBeenCalledWith(
+    'side-task:draft:1',
+    'Investigate echoed rename',
+    true,
+  );
+  expect(onError).not.toHaveBeenCalled();
+});

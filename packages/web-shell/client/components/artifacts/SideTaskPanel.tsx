@@ -252,7 +252,24 @@ function SideTaskSession({
           attempt++
         ) {
           try {
-            await actions.renameSession(nextTitle, { titleSource: 'auto' });
+            const result = await actions.renameSession(nextTitle, {
+              titleSource: 'auto',
+            });
+            // The daemon answers a discarded rename with 200 + the previous
+            // fields (e.g. the manual→auto downgrade guard no-ops the
+            // update). Treat a result whose effective name differs from the
+            // requested one as a failure so a discarded rename is never
+            // marked applied (#8977).
+            if (
+              result?.displayName !== undefined &&
+              result.displayName !== nextTitle
+            ) {
+              throw new Error(
+                `Rename was not applied: session kept ${JSON.stringify(
+                  result.displayName,
+                )}`,
+              );
+            }
             if (connection.sessionId && catalogOwnerCwd) {
               sessionCatalogController.renamed(
                 catalogOwnerCwd,

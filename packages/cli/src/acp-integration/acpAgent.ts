@@ -12060,8 +12060,13 @@ class QwenAgent implements Agent {
         if (recording) await recording.flush();
         const sessionService = sourceConfig.getSessionService();
         const title = deriveForkBaseName(name, recording, sessionId);
-        const titleSource =
-          typeof name === 'string' && name.trim() ? 'manual' : 'auto';
+        // Side tasks are seeded with the caller's generic panel label (the
+        // web-shell passes the i18n 'Side task' placeholder as `name`), not a
+        // user-chosen name, and are designed to be renamed from their first
+        // prompt with `titleSource: 'auto'`. Seeding 'manual' here would make
+        // the manual→auto downgrade guard silently discard that rename and
+        // pin the placeholder forever (#8977).
+        const titleSource = 'auto' as const;
         const newSessionId = randomUUID();
         const fork = () =>
           sessionService.forkSession(sessionId, newSessionId, {
