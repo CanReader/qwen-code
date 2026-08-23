@@ -5599,23 +5599,24 @@ export function registerSessionRoutes(
                 persistedWrite = true;
               }
               if (displayName !== undefined) {
-                // Mirror the live path's same-text downgrade guard in
-                // `bridge.updateSessionMetadata`: an `auto` re-rename whose
-                // text equals the persisted manual title must not append a
-                // downgrade record — the /clear carry gate would then drop
-                // the user's manual name (the #8977 regression itself).
-                // Skip the write and report the existing fields, as the
-                // live path does.
+                // Mirror the live path's manual→auto downgrade guard in
+                // `bridge.updateSessionMetadata`: a machine (`auto`)
+                // re-rename must never overwrite a persisted manual title,
+                // regardless of whether the text matches — otherwise the
+                // identical request is refused while the session is live
+                // but overwrites the manual name on disk when it is not
+                // (correctness becomes liveness-dependent). Skip the write
+                // and report the existing manual fields, as the live path
+                // does (#8977).
                 const persistedTitle = service.getSessionTitleInfo(
                   sessionId,
                   location,
                 );
                 if (
                   rawTitleSource === 'auto' &&
-                  persistedTitle.source === 'manual' &&
-                  persistedTitle.title === displayName
+                  persistedTitle.source === 'manual'
                 ) {
-                  effective.displayName = displayName;
+                  effective.displayName = persistedTitle.title || undefined;
                   effective.titleSource = 'manual';
                 } else {
                   const renamed = await service.renameSession(

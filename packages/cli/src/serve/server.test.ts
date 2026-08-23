@@ -26731,6 +26731,96 @@ describe('createServeApp', () => {
       },
     );
 
+    it.each([['active'], ['archived']] as const)(
+      'does not downgrade a persisted manual title on a different-text auto fallback (%s) (#8977)',
+      async (location) => {
+        // The live path's bridge guard blocks ANY manual→auto rename
+        // regardless of text; the persisted fallback must mirror that, or
+        // the same request is refused while the session is live but
+        // overwrites the manual name on disk once it is reaped/restarted
+        // (correctness becomes liveness-dependent).
+        const runtimeBaseDir = await fsp.mkdtemp(
+          path.join(os.tmpdir(), 'qwen-workspace-metadata-downgrade-diff-'),
+        );
+        const sessionId = '550e8400-e29b-41d4-a716-446655440034';
+        const chatsDir = path.join(
+          new Storage(WS_DIFFERENT, runtimeBaseDir).getProjectDir(),
+          'chats',
+          ...(location === 'archived' ? ['archive'] : []),
+        );
+        const filePath = path.join(chatsDir, `${sessionId}.jsonl`);
+        await fsp.mkdir(chatsDir, { recursive: true });
+        await fsp.writeFile(
+          filePath,
+          `${JSON.stringify({
+            uuid: 'record-1',
+            parentUuid: null,
+            sessionId,
+            timestamp: '2026-05-17T12:00:00.000Z',
+            type: 'user',
+            message: { role: 'user', parts: [{ text: 'original' }] },
+            cwd: WS_DIFFERENT,
+          })}\n${JSON.stringify({
+            uuid: 'record-2',
+            parentUuid: 'record-1',
+            sessionId,
+            timestamp: '2026-05-17T12:05:00.000Z',
+            type: 'system',
+            subtype: 'custom_title',
+            cwd: WS_DIFFERENT,
+            systemPayload: {
+              customTitle: 'My digest run',
+              titleSource: 'manual',
+            },
+          })}\n`,
+          'utf8',
+        );
+        const secondaryBridge = fakeBridge({
+          updateMetadataImpl: () => {
+            throw new SessionNotFoundError(sessionId);
+          },
+        });
+        const { app } = createWorkspaceMetadataApp(secondaryBridge, {
+          sessionRuntimeBaseDir: runtimeBaseDir,
+        });
+
+        try {
+          const res = await auth(
+            request(app).patch(
+              `/workspaces/ws-secondary/session/${sessionId}/metadata`,
+            ),
+          ).send({
+            displayName: '⏰ run the nightly digest',
+            titleSource: 'auto',
+          });
+          expect(res.status).toBe(200);
+          // The downgrade is refused: report the existing manual fields,
+          // not the requested auto rename.
+          expect(res.body).toEqual({
+            sessionId,
+            displayName: 'My digest run',
+            titleSource: 'manual',
+          });
+          // No downgrade record may be appended — the transcript keeps
+          // exactly its one manual custom_title record.
+          const records = (await fsp.readFile(filePath, 'utf8'))
+            .trim()
+            .split('\n')
+            .map((line) => JSON.parse(line) as Record<string, unknown>);
+          const titleRecords = records.filter(
+            (record) => record['subtype'] === 'custom_title',
+          );
+          expect(titleRecords).toHaveLength(1);
+          expect(titleRecords[0]?.['systemPayload']).toEqual({
+            customTitle: 'My digest run',
+            titleSource: 'manual',
+          });
+        } finally {
+          await fsp.rm(runtimeBaseDir, { recursive: true, force: true });
+        }
+      },
+    );
+
     it('updates the selected workspace runtime with client identity', async () => {
       const secondaryBridge = fakeBridge();
       const { app, primaryBridge } =
