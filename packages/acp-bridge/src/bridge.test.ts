@@ -27003,6 +27003,56 @@ describe('createAcpSessionBridge', () => {
       await bridge.shutdown();
     });
 
+    it('echoes titleSource on the pr-only metadata event (#8977)', async () => {
+      // Binding a PR to a manually named session publishes a pr-only
+      // event that echoes the current name. Client folds reset provenance
+      // to undefined for a name-without-titleSource event, so the echo
+      // must carry `titleSource` too — otherwise the binding strips the
+      // connection's `manual` provenance and the /clear carry gate drops
+      // the name the PR exists to protect.
+      const bridge = makeBridge({
+        channelFactory: async () => makeChannel().channel,
+      });
+      const session = await bridge.spawnOrAttach({ workspaceCwd: WS_A });
+
+      // A user names the session (manual).
+      bridge.updateSessionMetadata(session.sessionId, {
+        displayName: 'My digest run',
+        titleSource: 'manual',
+      });
+
+      const events: BridgeEvent[] = [];
+      const sub = bridge.subscribeEvents(session.sessionId);
+      const drain = (async () => {
+        for await (const ev of sub) events.push(ev);
+      })();
+      await new Promise((r) => setImmediate(r));
+
+      bridge.updateSessionMetadata(session.sessionId, {
+        pr: { number: 9517, url: 'https://github.com/o/r/pull/9517' },
+      });
+
+      await new Promise((r) => setImmediate(r));
+      const prEvent = events.find(
+        (e) =>
+          e.type === 'session_metadata_updated' &&
+          (e.data as { prs?: unknown }).prs !== undefined,
+      );
+      expect(prEvent).toBeDefined();
+      // The wire shape is what matters: JSON drops undefined keys, so
+      // assert what actually survives serialization.
+      const wire = JSON.parse(JSON.stringify(prEvent?.data)) as Record<
+        string,
+        unknown
+      >;
+      expect(wire['displayName']).toBe('My digest run');
+      expect(wire['titleSource']).toBe('manual');
+
+      await bridge.closeSession(session.sessionId);
+      await drain;
+      await bridge.shutdown();
+    });
+
     it('publishes the full seeded binding history in the reply and event after an entry re-creation', async () => {
       // Daemon restart / close / archive-restore re-creates the entry with
       // an empty in-memory pr list; the serve layer re-hydrates it from the

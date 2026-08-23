@@ -10018,10 +10018,18 @@ export function createAcpSessionBridge(opts: BridgeOptions): AcpSessionBridge {
               type: 'session_metadata_updated',
               // Echo the current name: SDK folds treat an absent displayName
               // as "cleared", so a pr-only event must not blank the title.
+              // Echo the provenance beside it: client folds reset
+              // `titleSource` to undefined for a name-without-titleSource
+              // event, so omitting it here would strip a manual session's
+              // provenance when a PR is bound and disarm the /clear carry
+              // gate (#8977).
               data: {
                 sessionId,
                 ...(entry.displayName !== undefined
                   ? { displayName: entry.displayName }
+                  : {}),
+                ...(entry.titleSource !== undefined
+                  ? { titleSource: entry.titleSource }
                   : {}),
                 prs: entry.prs,
               },
