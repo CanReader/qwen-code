@@ -270,11 +270,14 @@ export function SessionPicker(props: SessionPickerProps) {
     const previewed = picker.filteredSessions.find(
       (s) => s.sessionId === picker.previewSessionId,
     );
+    // Falsy gate, not nullish: a cleared title persists an empty customTitle
+    // tombstone, and the preview header must fall back to the first prompt
+    // like every other display surface (#8977).
     return (
       <SessionPreview
         sessionService={sessionService}
         sessionId={picker.previewSessionId}
-        sessionTitle={previewed?.customTitle ?? previewed?.prompt ?? undefined}
+        sessionTitle={previewed?.customTitle || previewed?.prompt || undefined}
         messageCount={previewed?.messageCount}
         mtime={previewed?.mtime}
         gitBranch={previewed?.gitBranch}

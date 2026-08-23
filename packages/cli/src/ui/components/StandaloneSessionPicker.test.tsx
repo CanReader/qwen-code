@@ -890,6 +890,37 @@ describe('SessionPicker', () => {
       expect(onSelect).toHaveBeenCalledWith('s1');
     });
 
+    it('falls back to the first prompt when the previewed title is a cleared tombstone (#8977)', async () => {
+      // Clearing a session title persists an empty customTitle tombstone.
+      // The preview header must treat '' as absent (falsy gate) and fall
+      // back to the first prompt — a nullish chain would render a blank
+      // title line instead.
+      const sessions = [
+        createMockSession({
+          sessionId: 's1',
+          customTitle: '',
+          prompt: 'Fallback prompt',
+          messageCount: 2,
+        }),
+      ];
+      const service = createMockSessionService(sessions);
+      service.loadSession.mockResolvedValue(fakeResumedData('s1'));
+
+      const { stdin, lastFrame } = renderPicker(
+        <SessionPicker
+          sessionService={service as never}
+          onSelect={vi.fn()}
+          onCancel={vi.fn()}
+          enablePreview
+        />,
+      );
+
+      await flush();
+      stdin.write(' '); // open preview on s1
+      await flush();
+      expect(lastFrame() ?? '').toContain('Fallback prompt');
+    });
+
     it('without enablePreview, Space is a no-op and footer omits the hint', async () => {
       // Regression: SessionPicker is also reused by the delete-session
       // dialog, where `onSelect = handleDelete`. If preview were on by
