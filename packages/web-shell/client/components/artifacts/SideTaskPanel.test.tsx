@@ -746,3 +746,60 @@ it('marks the first-prompt title complete when the daemon echoes the new name', 
   );
   expect(onError).not.toHaveBeenCalled();
 });
+
+it('marks the first-prompt title complete when the daemon echoes its 256-unit truncation', async () => {
+  connection.sessionId = 'side-session-1';
+  connection.status = 'connected';
+  // The daemon's PATCH metadata routes truncate displayName at 256 UTF-16
+  // code units and answer with the stored value, while nextTitle is capped
+  // at 200 code *points*: 130 🔥 fit the point cap but span 260 code units,
+  // so an APPLIED rename echoes back shorter (128 🔥) and must not be
+  // mistaken for a discarded one (#8977).
+  const requested = '🔥'.repeat(130);
+  const daemonEcho = requested.slice(0, 256);
+  expect(daemonEcho).not.toBe(requested);
+  renameSession.mockResolvedValue({
+    displayName: daemonEcho,
+    titleSource: 'auto',
+  });
+  container = document.createElement('div');
+  document.body.appendChild(container);
+  root = createRoot(container);
+
+  const onTitleChange = vi.fn();
+  const onError = vi.fn();
+  act(() => {
+    renderSideTask({
+      tabId: 'side-task:draft:1',
+      shouldNameFromFirstPrompt: true,
+      onTitleChange,
+      onError,
+    });
+  });
+
+  await act(async () => {
+    (
+      latestChatPaneProps.current?.['onFirstPromptAdmitted'] as (
+        text: string,
+      ) => void
+    )(requested);
+    await Promise.resolve();
+  });
+
+  expect(renameSession).toHaveBeenCalledTimes(1);
+  expect(renameSession).toHaveBeenCalledWith(requested, {
+    titleSource: 'auto',
+  });
+  expect(catalogController.renamed).toHaveBeenCalledWith(
+    '/work/project',
+    'side-session-1',
+    requested,
+  );
+  expect(onTitleChange).toHaveBeenCalledWith(
+    'side-task:draft:1',
+    requested,
+    true,
+  );
+  expect(catalogController.invalidateWorkspace).not.toHaveBeenCalled();
+  expect(onError).not.toHaveBeenCalled();
+});

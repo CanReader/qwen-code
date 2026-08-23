@@ -259,10 +259,15 @@ function SideTaskSession({
             // fields (e.g. the manual→auto downgrade guard no-ops the
             // update). Treat a result whose effective name differs from the
             // requested one as a failure so a discarded rename is never
-            // marked applied (#8977).
+            // marked applied (#8977). The daemon truncates displayName at
+            // 256 UTF-16 code units while nextTitle is capped at 200 code
+            // points (up to 400 units), so an applied rename of a long
+            // astral-heavy title echoes back shorter — accept the daemon's
+            // truncation of the requested title as applied.
             if (
               result?.displayName !== undefined &&
-              result.displayName !== nextTitle
+              result.displayName !== nextTitle &&
+              result.displayName !== nextTitle.slice(0, 256)
             ) {
               throw new Error(
                 `Rename was not applied: session kept ${JSON.stringify(
