@@ -26821,6 +26821,108 @@ describe('createServeApp', () => {
       },
     );
 
+    it.each([['active'], ['archived']] as const)(
+      'lets an auto fallback rename a cleared (tombstoned) session again (%s) (#8977)',
+      async (location) => {
+        // The clear flow persists an empty-string tombstone with 'manual'
+        // provenance (the bridge dispatches `displayName: ''` without a
+        // titleSource and the child handler defaults the source to
+        // 'manual'). A tombstone means "no title": a cold-restored session
+        // seeds no live title fields, so the live guard never fires and the
+        // identical auto rename succeeds while live — the persisted
+        // fallback must not treat the tombstone as a protected manual name,
+        // or correctness becomes liveness-dependent again (R12-31).
+        const runtimeBaseDir = await fsp.mkdtemp(
+          path.join(os.tmpdir(), 'qwen-workspace-metadata-tombstone-'),
+        );
+        const sessionId = '550e8400-e29b-41d4-a716-446655440034';
+        const chatsDir = path.join(
+          new Storage(WS_DIFFERENT, runtimeBaseDir).getProjectDir(),
+          'chats',
+          ...(location === 'archived' ? ['archive'] : []),
+        );
+        const filePath = path.join(chatsDir, `${sessionId}.jsonl`);
+        await fsp.mkdir(chatsDir, { recursive: true });
+        await fsp.writeFile(
+          filePath,
+          `${JSON.stringify({
+            uuid: 'record-1',
+            parentUuid: null,
+            sessionId,
+            timestamp: '2026-05-17T12:00:00.000Z',
+            type: 'user',
+            message: { role: 'user', parts: [{ text: 'original' }] },
+            cwd: WS_DIFFERENT,
+          })}\n${JSON.stringify({
+            uuid: 'record-2',
+            parentUuid: 'record-1',
+            sessionId,
+            timestamp: '2026-05-17T12:05:00.000Z',
+            type: 'system',
+            subtype: 'custom_title',
+            cwd: WS_DIFFERENT,
+            systemPayload: {
+              customTitle: 'Deleted name',
+              titleSource: 'manual',
+            },
+          })}\n${JSON.stringify({
+            uuid: 'record-3',
+            parentUuid: 'record-2',
+            sessionId,
+            timestamp: '2026-05-17T12:10:00.000Z',
+            type: 'system',
+            subtype: 'custom_title',
+            cwd: WS_DIFFERENT,
+            systemPayload: {
+              customTitle: '',
+              titleSource: 'manual',
+            },
+          })}\n`,
+          'utf8',
+        );
+        const secondaryBridge = fakeBridge({
+          updateMetadataImpl: () => {
+            throw new SessionNotFoundError(sessionId);
+          },
+        });
+        const { app } = createWorkspaceMetadataApp(secondaryBridge, {
+          sessionRuntimeBaseDir: runtimeBaseDir,
+        });
+
+        try {
+          const res = await auth(
+            request(app).patch(
+              `/workspaces/ws-secondary/session/${sessionId}/metadata`,
+            ),
+          ).send({ displayName: 'Machine retitle', titleSource: 'auto' });
+          expect(res.status).toBe(200);
+          // The tombstone is not a protected manual title: the rename
+          // applies and is reported, exactly as the live path would.
+          expect(res.body).toEqual({
+            sessionId,
+            displayName: 'Machine retitle',
+            titleSource: 'auto',
+          });
+          // The auto title lands as a new custom_title record after the
+          // tombstone — a blocked rename would leave the tombstone last.
+          const records = (await fsp.readFile(filePath, 'utf8'))
+            .trim()
+            .split('\n')
+            .map((line) => JSON.parse(line) as Record<string, unknown>);
+          const titleRecords = records.filter(
+            (record) => record['subtype'] === 'custom_title',
+          );
+          expect(titleRecords).toHaveLength(3);
+          expect(titleRecords[2]?.['systemPayload']).toEqual({
+            customTitle: 'Machine retitle',
+            titleSource: 'auto',
+          });
+        } finally {
+          await fsp.rm(runtimeBaseDir, { recursive: true, force: true });
+        }
+      },
+    );
+
     it('updates the selected workspace runtime with client identity', async () => {
       const secondaryBridge = fakeBridge();
       const { app, primaryBridge } =

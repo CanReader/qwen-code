@@ -5607,14 +5607,23 @@ export function registerSessionRoutes(
                 // but overwrites the manual name on disk when it is not
                 // (correctness becomes liveness-dependent). Skip the write
                 // and report the existing manual fields, as the live path
-                // does (#8977).
+                // does (#8977). Truthiness matters here: an empty-string
+                // title is the clear-tombstone, which means "no title" —
+                // a tombstoned session seeds no live title fields on cold
+                // restore (`restoreSessionTitleFields` returns {} for an
+                // empty title), so the live guard never fires for it and
+                // the identical auto rename succeeds while live; only a
+                // non-empty manual title may block this fallback (the
+                // chatRecordingService auto-title guard carves out the
+                // tombstone the same way).
                 const persistedTitle = service.getSessionTitleInfo(
                   sessionId,
                   location,
                 );
                 if (
                   rawTitleSource === 'auto' &&
-                  persistedTitle.source === 'manual'
+                  persistedTitle.source === 'manual' &&
+                  persistedTitle.title
                 ) {
                   effective.displayName = persistedTitle.title || undefined;
                   effective.titleSource = 'manual';
