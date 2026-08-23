@@ -741,6 +741,89 @@ describe('BridgeClient — recording degradation ownership', () => {
   });
 });
 
+describe('BridgeClient — title-update echo ownership (#8977)', () => {
+  it('leaves the shared entry untouched when a non-owning channel echoes a title-update', async () => {
+    // The session's authoritative connection moved to another channel while
+    // this channel's transport is still live; a `sessionTitle` persist
+    // dispatched just before teardown comes back as a `title-update` echo.
+    // Without the ownership gate (which the sibling recording-degraded
+    // handler has) the stale title + auto provenance overwrite the shared
+    // entry's manual state and disarm the manual→auto downgrade guard.
+    const sessionId = 'session-owned-by-new-channel';
+    const publish = vi.fn();
+    const entry = {
+      sessionId,
+      events: { publish },
+      displayName: 'My digest run',
+      titleSource: 'manual' as const,
+    };
+    const noPermissionFlow = () => {
+      throw new Error('test: permission flow should not run');
+    };
+    const client = new BridgeClient(
+      ((id: string) => (id === sessionId ? entry : undefined)) as never,
+      (() => undefined) as never,
+      { request: noPermissionFlow } as never,
+      0,
+      Infinity,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => false, // ownsSession: this channel no longer owns the session
+    );
+
+    await client.extNotification('qwen/notify/session/title-update', {
+      v: 1,
+      sessionId,
+      title: 'stale auto title',
+      titleSource: 'auto',
+    });
+
+    expect(entry.displayName).toBe('My digest run');
+    expect(entry.titleSource).toBe('manual');
+    expect(publish).not.toHaveBeenCalled();
+  });
+
+  it('still applies and republishes an owned channel title-update echo', async () => {
+    // Positive control: the owning channel's echo must still land so the
+    // ownership gate does not break the legitimate child auto-title path.
+    const sessionId = 'session-owned';
+    const publish = vi.fn().mockReturnValue(true);
+    const entry = {
+      sessionId,
+      events: { publish },
+      displayName: undefined as string | undefined,
+      titleSource: undefined as 'manual' | 'auto' | undefined,
+    };
+    const noPermissionFlow = () => {
+      throw new Error('test: permission flow should not run');
+    };
+    const client = new BridgeClient(
+      ((id: string) => (id === sessionId ? entry : undefined)) as never,
+      (() => undefined) as never,
+      { request: noPermissionFlow } as never,
+      0,
+      Infinity,
+    );
+
+    await client.extNotification('qwen/notify/session/title-update', {
+      v: 1,
+      sessionId,
+      title: 'Auto title',
+      titleSource: 'auto',
+    });
+
+    expect(entry.displayName).toBe('Auto title');
+    expect(entry.titleSource).toBe('auto');
+    expect(publish).toHaveBeenCalledTimes(1);
+    expect(publish.mock.calls[0][0]).toMatchObject({
+      type: 'session_metadata_updated',
+      data: { sessionId, displayName: 'Auto title', titleSource: 'auto' },
+    });
+  });
+});
+
 describe('BridgeClient — BridgeFileSystem injection seam (F1 step 5)', () => {
   describe('writeTextFile', () => {
     it('delegates to the injected fileSystem.writeText, bypassing the inline fs proxy', async () => {

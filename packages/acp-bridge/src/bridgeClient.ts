@@ -2199,6 +2199,14 @@ export class BridgeClient implements Client {
         rawTitleSource === 'manual' || rawTitleSource === 'auto'
           ? rawTitleSource
           : undefined;
+      // Ownership gate, mirroring the sibling recording-degraded handler:
+      // `resolveEntry` is the bridge-wide byId map shared by every channel,
+      // and a dying channel's transport can still deliver in-flight echoes
+      // after the session's authoritative connection moved elsewhere. An
+      // unowned echo must not mutate the shared entry (a stale title/auto
+      // provenance would overwrite the owning channel's manual state and
+      // disarm the manual→auto downgrade guard) nor republish it (#8977).
+      if (!this.ownsSession(sessionId)) return;
       entry.displayName = title;
       entry.titleSource = titleSource;
       // The child appends the automatic title as a `custom_title` record to
