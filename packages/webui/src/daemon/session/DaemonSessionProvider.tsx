@@ -1249,6 +1249,18 @@ export function DaemonSessionProvider(props: DaemonSessionProviderProps) {
 
       while (!disposed && !abort.signal.aborted) {
         let loadedSessionThisIteration = false;
+        // Title fields observed on the connection right before the load
+        // call. The load-gated merge compares the post-load connection
+        // against this snapshot: if nothing changed the title during the
+        // load window, the (title-less) load response is authoritative
+        // and a stale client-side name must clear instead of resurrecting
+        // (#8977).
+        let preLoadTitleSnapshot:
+          | {
+              displayName?: string;
+              titleSource?: 'manual' | 'auto';
+            }
+          | undefined;
         const skipMetadataRefreshThisIteration = skipMetadataRefresh;
         skipMetadataRefresh = false;
         let loadingRequestedSession = false;
@@ -1520,6 +1532,15 @@ export function DaemonSessionProvider(props: DaemonSessionProviderProps) {
             const restoreRequestTimeoutMs =
               attemptedLoad?.requestTimeoutMs ??
               resolveSessionRestoreTimeouts(capabilities).requestTimeoutMs;
+            // Snapshot BEFORE the await: any title change landing while the
+            // load is in flight (a replayed metadata event during a repair
+            // reload, a live rename) must survive the load-gated merge; a
+            // title untouched since this snapshot is stale client state that
+            // a title-less load response clears (#8977).
+            preLoadTitleSnapshot = {
+              displayName: connectionRef.current.displayName,
+              titleSource: connectionRef.current.titleSource,
+            };
             const nextSession = restoreSessionId
               ? await restoreMethod(
                   client,
@@ -2213,62 +2234,81 @@ export function DaemonSessionProvider(props: DaemonSessionProviderProps) {
             activeSession.consumeReplaySnapshot();
           }
           const restoredTitle = getRestoredSessionTitle(activeSession.session);
-          setConnection((current) => ({
-            ...current,
-            status: 'connected',
-            sessionId: activeSession.sessionId,
-            ...(activeSession.clientId
-              ? { clientId: activeSession.clientId }
-              : {}),
-            workspaceCwd: activeSession.workspaceCwd,
-            displayName: loadedSessionThisIteration
-              ? (getSessionDisplayName(activeSession.state) ??
-                restoredTitle.displayName ??
-                (current.sessionId === activeSession.sessionId
+          setConnection((current) => {
+            // Load is authoritative for the title: when the response carries
+            // no name, the session has none server-side (a clear persisted
+            // while this client's SSE was down is never redelivered — SSE
+            // resumes from the load watermark). Carrying the current
+            // connection's fields unconditionally would resurrect the stale
+            // name AND its 'manual' provenance, re-arming the /clear carry
+            // gate. Carry them only when something updated them during this
+            // load window (a metadata event replayed by a live-journal
+            // repair, or a rename that landed mid-load), detected by
+            // diffing against the snapshot taken before the load call
+            // (#8977).
+            const titleRefreshedDuringLoad =
+              preLoadTitleSnapshot !== undefined &&
+              (current.displayName !== preLoadTitleSnapshot.displayName ||
+                current.titleSource !== preLoadTitleSnapshot.titleSource);
+            const carryCurrentTitle =
+              current.sessionId === activeSession.sessionId &&
+              (!loadedSessionThisIteration || titleRefreshedDuringLoad);
+            const serverTitle =
+              getSessionDisplayName(activeSession.state) ??
+              restoredTitle.displayName;
+            return {
+              ...current,
+              status: 'connected',
+              sessionId: activeSession.sessionId,
+              ...(activeSession.clientId
+                ? { clientId: activeSession.clientId }
+                : {}),
+              workspaceCwd: activeSession.workspaceCwd,
+              displayName: loadedSessionThisIteration
+                ? (serverTitle ??
+                  (carryCurrentTitle ? current.displayName : undefined))
+                : carryCurrentTitle
                   ? current.displayName
-                  : undefined))
-              : current.sessionId === activeSession.sessionId
-                ? current.displayName
-                : undefined,
-            // Provenance follows whichever name source won above: a
-            // server-provided name carries the snapshot's source (a legacy
-            // snapshot with none clears a stale client-side 'manual'); only
-            // when the name itself came from the current connection (e.g. a
-            // replayed metadata event during repair) is the current source
-            // kept.
-            titleSource: loadedSessionThisIteration
-              ? (getSessionDisplayName(activeSession.state) ??
-                  restoredTitle.displayName) !== undefined
-                ? restoredTitle.titleSource
-                : current.sessionId === activeSession.sessionId
-                  ? current.titleSource
-                  : undefined
-              : current.sessionId === activeSession.sessionId
-                ? current.titleSource
-                : undefined,
-            tokenUsage:
-              replayTokenUsage !== undefined
-                ? replayTokenUsage
-                : current.sessionId === activeSession.sessionId
-                  ? current.tokenUsage
                   : undefined,
-            tokenCount:
-              replayTokenCount !== undefined
-                ? replayTokenCount
-                : current.sessionId === activeSession.sessionId
-                  ? (current.tokenCount ?? 0)
-                  : 0,
-            goalState:
-              current.sessionId === activeSession.sessionId
-                ? current.goalState
-                : undefined,
-            loadingTranscript: undefined,
-            catchingUp: replayInjected
-              ? current.catchingUp
-              : isSameSessionReconnect ||
-                activeSession.lastEventId != null ||
-                undefined,
-          }));
+              // Provenance follows whichever name source won above: a
+              // server-provided name carries the snapshot's source (a
+              // legacy snapshot with none clears a stale client-side
+              // 'manual'); only when the name itself came from the current
+              // connection (e.g. a replayed metadata event during repair)
+              // is the current source kept.
+              titleSource: loadedSessionThisIteration
+                ? serverTitle !== undefined
+                  ? restoredTitle.titleSource
+                  : carryCurrentTitle
+                    ? current.titleSource
+                    : undefined
+                : carryCurrentTitle
+                  ? current.titleSource
+                  : undefined,
+              tokenUsage:
+                replayTokenUsage !== undefined
+                  ? replayTokenUsage
+                  : current.sessionId === activeSession.sessionId
+                    ? current.tokenUsage
+                    : undefined,
+              tokenCount:
+                replayTokenCount !== undefined
+                  ? replayTokenCount
+                  : current.sessionId === activeSession.sessionId
+                    ? (current.tokenCount ?? 0)
+                    : 0,
+              goalState:
+                current.sessionId === activeSession.sessionId
+                  ? current.goalState
+                  : undefined,
+              loadingTranscript: undefined,
+              catchingUp: replayInjected
+                ? current.catchingUp
+                : isSameSessionReconnect ||
+                  activeSession.lastEventId != null ||
+                  undefined,
+            };
+          });
           if (pendingLoadToResolve) {
             lastHandledSessionIdRef.current = activeSession.sessionId;
             lastHandledWorkspaceRef.current = activeSession.workspaceCwd;

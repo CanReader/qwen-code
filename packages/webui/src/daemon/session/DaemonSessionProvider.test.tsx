@@ -8841,6 +8841,69 @@ describe('DaemonSessionProvider', () => {
     expect(connection?.titleSource).toBeUndefined();
   });
 
+  it('clears the connection title when a same-session reload carries none (#8977)', async () => {
+    const firstSession = createMockSession({
+      events: async function* metadataThenResync() {
+        yield {
+          id: 9,
+          v: 1,
+          type: 'session_metadata_updated',
+          data: {
+            sessionId: 'session-1',
+            displayName: 'Cleared elsewhere',
+            titleSource: 'manual',
+          },
+        };
+        yield {
+          id: 10,
+          v: 1,
+          type: 'state_resync_required',
+          data: {
+            reason: 'slow_client',
+            lastDeliveredId: 9,
+            earliestAvailableId: 10,
+          },
+        };
+      },
+    });
+    // A server-side clear persists a tombstone that the load path
+    // normalizes to absence: the reload response carries no
+    // displayName/titleSource keys at all. The stale client-side title from
+    // the missed clear event must NOT resurrect (#8977).
+    const clearedReload = createMockSession({
+      session: {
+        sessionId: 'session-1',
+        workspaceCwd: '/mock-workspace',
+        attached: true,
+      },
+      events: createIdleEvents(),
+    });
+    sdkMocks.sessions.push(firstSession, clearedReload);
+    let connection: DaemonConnectionState | undefined;
+
+    function Harness() {
+      connection = useDaemonConnection();
+      return null;
+    }
+
+    await renderWithProvider(<Harness />, {
+      autoConnect: true,
+      reconnectDelayMs: 1,
+      maxReconnectDelayMs: 1,
+    });
+    await act(async () => {
+      await wait(20);
+      await flushPromises();
+    });
+
+    expect(connection).toMatchObject({
+      sessionId: 'session-1',
+      status: 'connected',
+    });
+    expect(connection?.displayName).toBeUndefined();
+    expect(connection?.titleSource).toBeUndefined();
+  });
+
   it('updates the connection display name from metadata events', async () => {
     sdkMocks.sessions.push(
       createMockSession({
