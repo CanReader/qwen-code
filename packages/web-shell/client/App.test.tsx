@@ -11410,6 +11410,134 @@ describe('App session callbacks', () => {
     expect(mockSessionActions.renameSession).not.toHaveBeenCalled();
   });
 
+  it('keeps a re-armed carry when a stale fold landing resolves late (#8977)', async () => {
+    let large = true;
+    let changeHandler: ((event: { matches: boolean }) => void) | undefined;
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: vi.fn().mockImplementation((query: string) => ({
+        get matches() {
+          return query.includes('min-width') ? large : false;
+        },
+        media: query,
+        addEventListener: (
+          _type: string,
+          cb: (event: { matches: boolean }) => void,
+        ) => {
+          if (query.includes('1024')) changeHandler = cb;
+        },
+        removeEventListener: vi.fn(),
+      })),
+    });
+    mockConnection.titleSource = 'manual';
+    mockConnection.displayName = 'My manual name';
+    const creation = deferred<{ sessionId: string }>();
+    mockSessionActions.createSession.mockImplementationOnce(async () => {
+      const result = await creation.promise;
+      mockConnection.sessionId = result.sessionId;
+      return result;
+    });
+    const { container } = renderApp();
+    await flush();
+
+    // Seed the split with the connected session so a later shrink has a
+    // pane to land on.
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('[data-testid="open-split-view"]')
+        ?.click();
+      await Promise.resolve();
+    });
+
+    // /clear arms the carry.
+    await act(async () => {
+      testState.latestChatEditorProps?.onSubmit('/clear');
+      await vi.waitFor(() => {
+        expect(mockSessionActions.clearSession).toHaveBeenCalledOnce();
+      });
+    });
+    mockConnection.sessionId = undefined;
+    mockConnection.displayName = undefined;
+    mockConnection.titleSource = undefined;
+
+    // Re-enter the split and shrink: the fold's landing load hangs on a
+    // slow runtime while the carry is armed.
+    const landingLoad = deferred<void>();
+    mockSessionActions.loadSession.mockImplementationOnce(
+      () => landingLoad.promise,
+    );
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('[data-testid="open-split-view"]')
+        ?.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      large = false;
+      changeHandler?.({ matches: false });
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      expect(mockSessionActions.loadSession).toHaveBeenCalledWith('session-1');
+    });
+    await flush();
+
+    // The first prompt's deferred creation captures the carry, completes,
+    // renames, and consumes the fold-time token by identity.
+    await act(async () => {
+      testState.latestChatEditorProps?.onSubmit('first prompt');
+      await vi.waitFor(() => {
+        expect(mockSessionActions.createSession).toHaveBeenCalledOnce();
+      });
+    });
+    await act(async () => {
+      creation.resolve({ sessionId: 'session-2' });
+      await vi.waitFor(() => {
+        expect(mockSessionActions.renameSession).toHaveBeenCalledWith(
+          'My manual name',
+          { silent: true },
+        );
+        expect(mockSessionActions.attachSession).toHaveBeenCalledOnce();
+      });
+    });
+    expect(mockSessionActions.renameSession).toHaveBeenCalledTimes(1);
+
+    // The renamed session reports the manual name; a second /clear re-arms
+    // the carry with a fresh token.
+    mockConnection.titleSource = 'manual';
+    mockConnection.displayName = 'My manual name';
+    await act(async () => {
+      testState.latestChatEditorProps?.onSubmit('/clear');
+      await vi.waitFor(() => {
+        expect(mockSessionActions.clearSession).toHaveBeenCalledTimes(2);
+      });
+    });
+    mockConnection.sessionId = undefined;
+    mockConnection.displayName = undefined;
+    mockConnection.titleSource = undefined;
+
+    // Only now does the stale fold landing resolve: the invalidation must
+    // clear only the token that existed at fold time, not the re-armed one.
+    await act(async () => {
+      landingLoad.resolve();
+      await landingLoad.promise;
+      await Promise.resolve();
+    });
+
+    // The next prompt's deferred creation must receive the re-armed name.
+    await act(async () => {
+      testState.latestChatEditorProps?.onSubmit('second prompt');
+      await vi.waitFor(() => {
+        expect(mockSessionActions.createSession).toHaveBeenCalledTimes(2);
+        expect(mockSessionActions.renameSession).toHaveBeenCalledTimes(2);
+        expect(mockSessionActions.renameSession).toHaveBeenLastCalledWith(
+          'My manual name',
+          { silent: true },
+        );
+      });
+    });
+  });
+
   it('focuses the composer after loading an existing session', async () => {
     const { container, rerender } = renderApp();
     await flush();

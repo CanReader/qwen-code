@@ -5130,14 +5130,22 @@ export function App({
           // Invalidate the carried name only once the landing actually
           // succeeds: a failed load leaves the empty chat the carry exists
           // for, and the first prompt there must still receive the name.
+          const carryAtFold = pendingManualTitleRef.current;
           void sessionActions
             .loadSession(firstPane)
             .then(() => {
               // …and only when no deferred creation has captured the carry:
               // an in-flight creation manages the token's lifecycle itself
               // (identity-checked rename + post-success clear), and clearing
-              // here mid-flight would race the name away from it.
-              if (!createSessionPromiseRef.current) {
+              // here mid-flight would race the name away from it. Anchor the
+              // clear to the fold-time token (same identity discipline as
+              // ensureSessionForPrompt's cleanup): a slow landing must not
+              // erase a carry that a later /clear re-armed after this fold
+              // started (#8977).
+              if (
+                !createSessionPromiseRef.current &&
+                pendingManualTitleRef.current === carryAtFold
+              ) {
                 pendingManualTitleRef.current = undefined;
               }
             })
