@@ -43,6 +43,7 @@ import {
   isCompatibleLiveSessionSource,
   LIVE_SESSION_SOURCE_PREFIX,
 } from '../../runtime/live-session-source.js';
+import { normalizeSessionIdForLookup } from '../../config/session-id.js';
 import type { LiveProviderReadiness, LiveSessionLocator } from './types.js';
 import { restoreSessionTitleFields } from '../session-restore-title.js';
 
@@ -1408,7 +1409,7 @@ export class LiveSessionCoordinator {
     if (candidate) {
       try {
         const resumed = await runtime.bridge.resumeSession({
-          sessionId: candidate.sessionId,
+          sessionId: normalizeSessionIdForLookup(candidate.sessionId),
           workspaceCwd: runtime.workspaceCwd,
           ...(candidate.parentSessionId
             ? { parentSessionId: candidate.parentSessionId }
