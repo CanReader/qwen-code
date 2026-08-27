@@ -799,8 +799,13 @@ describe('DaemonClient', () => {
           runtimeSync: { status: 'failed' as const },
         };
         const { fetch } = recordingFetch(
-          () =>
-            new Promise<Response>((resolve) => {
+          (req) =>
+            new Promise<Response>((resolve, reject) => {
+              req.signal?.addEventListener(
+                'abort',
+                () => reject(req.signal?.reason),
+                { once: true },
+              );
               setTimeout(() => resolve(jsonResponse(200, result)), 31_000);
             }),
         );
@@ -833,8 +838,13 @@ describe('DaemonClient', () => {
           runtimeSync: { status: 'failed' as const },
         };
         const { fetch } = recordingFetch(
-          () =>
-            new Promise<Response>((resolve) => {
+          (req) =>
+            new Promise<Response>((resolve, reject) => {
+              req.signal?.addEventListener(
+                'abort',
+                () => reject(req.signal?.reason),
+                { once: true },
+              );
               setTimeout(() => resolve(jsonResponse(200, result)), 31_000);
             }),
         );
