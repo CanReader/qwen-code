@@ -4578,6 +4578,30 @@ describe('QwenAgent MCP SSE/HTTP support', () => {
     await agentPromise;
   });
 
+  it('does not publish a session when the final provider reload fails', async () => {
+    await setupSessionMocks('session-provider-reload-failed');
+    const settings = makeSessionSettings() as LoadedSettings & {
+      reloadScopeFromDisk: ReturnType<typeof vi.fn>;
+    };
+    settings.reloadScopeFromDisk = vi.fn().mockReturnValue(false);
+    vi.mocked(loadSettings).mockReturnValue(settings);
+    const { agent, agentPromise } = await bootAcpAgent();
+
+    await expect(
+      agent.newSession({ cwd: '/tmp', mcpServers: [] }),
+    ).rejects.toThrow('Unable to reload model-provider settings from disk.');
+    expect(lastSessionMock?.dispose).toHaveBeenCalledOnce();
+    await expect(
+      agent.prompt({
+        sessionId: 'session-provider-reload-failed',
+        prompt: [{ type: 'text', text: 'hello' }],
+      }),
+    ).rejects.toThrow(/Session not found/);
+
+    mockConnectionState.resolve();
+    await agentPromise;
+  });
+
   it('treats an idle session cancellation as a no-op', async () => {
     await setupSessionMocks('session-idle-cancel');
     const { agent, agentPromise } = await bootAcpAgent();
@@ -23149,12 +23173,21 @@ describe('sessionLanguage multi-session propagation', () => {
         },
       ],
     };
+    let mergedSettings: Record<string, unknown> = {
+      modelProviders: providerConfig,
+      providerProtocol: { idealab: 'openai' },
+    };
     const settings = {
-      merged: {
-        modelProviders: providerConfig,
-        providerProtocol: { idealab: 'openai' },
+      get merged() {
+        return mergedSettings;
       },
-      reloadScopeFromDisk: vi.fn(),
+      reloadScopeFromDisk: vi.fn(() => {
+        mergedSettings = {
+          modelProviders: providerConfig,
+          providerProtocol: { idealab: 'openai' },
+        };
+        return true;
+      }),
       getUserHooks: vi.fn().mockReturnValue({}),
       getProjectHooks: vi.fn().mockReturnValue({}),
     } as unknown as LoadedSettings;
@@ -23221,6 +23254,10 @@ describe('sessionLanguage multi-session propagation', () => {
     vi.mocked(cfg2.reloadModelProvidersConfig).mockClear();
     vi.mocked(cfg1.refreshAuth).mockClear();
     vi.mocked(cfg2.refreshAuth).mockClear();
+    mergedSettings = {
+      modelProviders: { stale: [{ id: 'old-model' }] },
+      providerProtocol: { stale: 'openai' },
+    };
 
     const result = await agent.extMethod(
       SERVE_CONTROL_EXT_METHODS.workspaceModelProvidersReload,
@@ -23329,6 +23366,7 @@ describe('sessionLanguage multi-session propagation', () => {
       providerProtocol: { idealab: 'openai' },
     };
     vi.mocked(cfg.refreshAuth).mockClear();
+    vi.mocked(cfg.reloadModelProvidersConfig).mockClear();
     await agent.extMethod(SERVE_CONTROL_EXT_METHODS.workspaceReload, {});
 
     expect(cfg.reloadModelProvidersConfig).toHaveBeenCalledWith(
@@ -23484,6 +23522,7 @@ describe('sessionLanguage multi-session propagation', () => {
 
     await agent.newSession({ cwd: '/skills', mcpServers: [] });
     await agent.newSession({ cwd: '/skills', mcpServers: [] });
+    vi.mocked(bootstrapSettings.reloadScopeFromDisk).mockClear();
     await expect(
       agent.extMethod(SERVE_CONTROL_EXT_METHODS.workspaceSkillsRefresh, {
         reason: 'settings',
