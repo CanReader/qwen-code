@@ -2515,6 +2515,10 @@ export function createServeApp(
       broadcastSettingsChanged,
       parseAndValidateClientId: (req, res) =>
         parseAndValidateWorkspaceClientId(req, res, primaryBridge),
+      syncModelProvidersRuntime: () =>
+        primaryWorkspace.reloadModelProviders(
+          buildWorkspaceCtx('DELETE /workspace/models'),
+        ),
     });
   }
 
@@ -2549,6 +2553,10 @@ export function createServeApp(
     boundWorkspace: primaryBoundWorkspace,
     allowPrivateAuthBaseUrl: opts.allowPrivateAuthBaseUrl === true,
     installAuthProvider: deps.installAuthProvider,
+    syncModelProvidersRuntime: () =>
+      primaryWorkspace.reloadModelProviders(
+        buildWorkspaceCtx('POST /workspace/auth/provider'),
+      ),
     captureGenerationAssertion: capturePrimaryGenerationAssertion,
   });
 

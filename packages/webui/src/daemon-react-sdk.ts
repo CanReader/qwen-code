@@ -232,6 +232,7 @@ export type {
   DaemonAuthProviderDescriptor,
   DaemonAuthProviderInstallRequest,
   DaemonAuthProviderInstallResult,
+  DaemonModelProviderRuntimeSyncResult,
   DaemonAuthProviderModel,
   DaemonContextCategoryBreakdown,
   DaemonContextMemoryDetail,
