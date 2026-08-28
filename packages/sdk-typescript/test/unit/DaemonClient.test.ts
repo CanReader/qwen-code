@@ -789,7 +789,7 @@ describe('DaemonClient', () => {
       expect((err as DaemonHttpError).body).toEqual(body);
     });
 
-    it('waits past the daemon child-sync deadline for a persisted result', async () => {
+    it('waits for the complete delete pipeline by default', async () => {
       vi.useFakeTimers();
       try {
         const result = {
@@ -806,7 +806,7 @@ describe('DaemonClient', () => {
                 () => reject(req.signal?.reason),
                 { once: true },
               );
-              setTimeout(() => resolve(jsonResponse(200, result)), 31_000);
+              setTimeout(() => resolve(jsonResponse(200, result)), 55_000);
             }),
         );
         const client = new DaemonClient({ baseUrl: 'http://daemon', fetch });
@@ -817,16 +817,16 @@ describe('DaemonClient', () => {
             settled = true;
           });
 
-        await vi.advanceTimersByTimeAsync(30_000);
+        await vi.advanceTimersByTimeAsync(50_000);
         expect(settled).toBe(false);
-        await vi.advanceTimersByTimeAsync(1_000);
+        await vi.advanceTimersByTimeAsync(5_000);
         await expect(deletion).resolves.toEqual(result);
       } finally {
         vi.useRealTimers();
       }
     });
 
-    it('gives provider installation the same child-sync headroom', async () => {
+    it('waits for the complete provider-install pipeline by default', async () => {
       vi.useFakeTimers();
       try {
         const result = {
@@ -845,7 +845,7 @@ describe('DaemonClient', () => {
                 () => reject(req.signal?.reason),
                 { once: true },
               );
-              setTimeout(() => resolve(jsonResponse(200, result)), 31_000);
+              setTimeout(() => resolve(jsonResponse(200, result)), 55_000);
             }),
         );
         const client = new DaemonClient({ baseUrl: 'http://daemon', fetch });
@@ -856,9 +856,9 @@ describe('DaemonClient', () => {
             settled = true;
           });
 
-        await vi.advanceTimersByTimeAsync(30_000);
+        await vi.advanceTimersByTimeAsync(50_000);
         expect(settled).toBe(false);
-        await vi.advanceTimersByTimeAsync(1_000);
+        await vi.advanceTimersByTimeAsync(5_000);
         await expect(installation).resolves.toEqual(result);
       } finally {
         vi.useRealTimers();

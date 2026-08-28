@@ -6960,10 +6960,14 @@ describe('runQwenServe runtime startup failures', () => {
           },
         }) as unknown as ReturnType<typeof settingsRuntime.loadSettings>,
     );
-    vi.spyOn(settingsRuntime, 'reloadEnvironment').mockReturnValue({
-      updatedKeys: [],
-      removedKeys: [],
-    });
+    let failReloadRead = false;
+    const reloadEnvironment = vi
+      .spyOn(settingsRuntime, 'reloadEnvironment')
+      .mockImplementation(() => ({
+        updatedKeys: [],
+        removedKeys: [],
+        ...(failReloadRead ? { envFileReadFailed: true } : {}),
+      }));
     vi.spyOn(trustedFoldersRuntime, 'getWorkspaceTrustStatus').mockReturnValue({
       effective: { state: 'trusted' },
     } as ReturnType<typeof trustedFoldersRuntime.getWorkspaceTrustStatus>);
@@ -7051,10 +7055,12 @@ describe('runQwenServe runtime startup failures', () => {
           workspaceCwd: tmpDir,
         }),
       ).resolves.toEqual({ status: 'failed' });
+      expect(reloadEnvironment).not.toHaveBeenCalled();
       await workspace!.reload({
         route: 'POST /workspace/reload',
         workspaceCwd: tmpDir,
       });
+      expect(reloadEnvironment).not.toHaveBeenCalled();
 
       expect(primaryRuntimeEnv!.effectiveEnv).toBe(capturedRuntimeEnv);
       expect(capturedRuntimeEnv['QWEN_TEST_RUNTIME_VALUE']).toBe('boot');
@@ -7067,10 +7073,28 @@ describe('runQwenServe runtime startup failures', () => {
         route: 'POST /workspace/reload',
         workspaceCwd: tmpDir,
       });
+      expect(reloadEnvironment).toHaveBeenCalledOnce();
       expect(primaryRuntimeEnv!.effectiveEnv).toBe(capturedRuntimeEnv);
       expect(capturedRuntimeEnv['QWEN_TEST_RUNTIME_VALUE']).toBe('reloaded');
       expect(primaryRuntimeEnv!.fallbackReason).toBeUndefined();
 
+      failReloadRead = true;
+      await expect(
+        workspace!.reloadModelProviders({
+          route: 'POST /workspace/auth/provider',
+          workspaceCwd: tmpDir,
+        }),
+      ).resolves.toEqual({ status: 'failed' });
+      expect(reloadEnvironment).toHaveBeenCalledTimes(2);
+      expect(reloadEnvironment).toHaveBeenLastCalledWith(
+        expect.any(Object),
+        tmpDir,
+        true,
+        { failClosedOnEnvFileReadError: true },
+      );
+      expect(capturedRuntimeEnv['QWEN_TEST_RUNTIME_VALUE']).toBe('reloaded');
+
+      failReloadRead = false;
       failEnvFileRead = true;
       await expect(
         workspace!.reloadModelProviders({
@@ -7078,6 +7102,7 @@ describe('runQwenServe runtime startup failures', () => {
           workspaceCwd: tmpDir,
         }),
       ).resolves.toEqual({ status: 'failed' });
+      expect(reloadEnvironment).toHaveBeenCalledTimes(2);
       expect(primaryRuntimeEnv!.effectiveEnv).toBe(capturedRuntimeEnv);
       expect(capturedRuntimeEnv['QWEN_TEST_RUNTIME_VALUE']).toBe('reloaded');
       expect(primaryRuntimeEnv!.fallbackReason).toBeUndefined();
@@ -7087,7 +7112,7 @@ describe('runQwenServe runtime startup failures', () => {
       const logPath = path.join(logBaseDir, 'daemon', 'daemon.log');
       const log = fs.readFileSync(logPath, 'utf8');
       expect(log).toContain(
-        'failed to rebuild runtime env snapshot after daemon env reload; preserving previous runtime env',
+        'failed to rebuild runtime env snapshot before daemon env reload; preserving previous runtime env',
       );
     } finally {
       if (!closed) {
@@ -7138,10 +7163,12 @@ describe('runQwenServe runtime startup failures', () => {
         } as unknown as ReturnType<typeof settingsRuntime.loadSettings>;
       },
     );
-    vi.spyOn(settingsRuntime, 'reloadEnvironment').mockReturnValue({
-      updatedKeys: ['QWEN_TEST_SECONDARY_ENV'],
-      removedKeys: [],
-    });
+    const reloadEnvironment = vi
+      .spyOn(settingsRuntime, 'reloadEnvironment')
+      .mockReturnValue({
+        updatedKeys: ['QWEN_TEST_SECONDARY_ENV'],
+        removedKeys: [],
+      });
     vi.spyOn(trustedFoldersRuntime, 'getWorkspaceTrustStatus').mockReturnValue({
       effective: { state: 'trusted' },
     } as ReturnType<typeof trustedFoldersRuntime.getWorkspaceTrustStatus>);
@@ -7221,6 +7248,7 @@ describe('runQwenServe runtime startup failures', () => {
         route: 'POST /workspace/reload',
         workspaceCwd: secondary,
       });
+      expect(reloadEnvironment).toHaveBeenCalledOnce();
 
       expect(env.overlayKeys).toBe(overlayKeys);
       expect(env.envFilePaths).toBe(envFilePaths);
@@ -7236,6 +7264,7 @@ describe('runQwenServe runtime startup failures', () => {
         route: 'POST /workspace/reload',
         workspaceCwd: secondary,
       });
+      expect(reloadEnvironment).toHaveBeenCalledOnce();
       expect(env.effectiveEnv?.['QWEN_TEST_SECONDARY_ENV']).toBe('reloaded');
       expect(env.envFileReadFailed).toBe(false);
       expect(env.envFileReadFailures).toEqual([]);
