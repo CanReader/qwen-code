@@ -359,7 +359,7 @@ describe('QwenAgent loadSession — Phase C worktree context restore', () => {
       getTargetDir: vi.fn().mockReturnValue('/fake/project'),
       getAuthType: vi.fn().mockReturnValue('api-key'),
       getAllConfiguredModels: vi.fn().mockReturnValue([]),
-      getGeminiClient: vi.fn().mockReturnValue({
+      getLlmClient: vi.fn().mockReturnValue({
         isInitialized: vi.fn().mockReturnValue(true),
         initialize: vi.fn().mockResolvedValue(undefined),
         waitForMcpReady: vi.fn().mockResolvedValue(undefined),
