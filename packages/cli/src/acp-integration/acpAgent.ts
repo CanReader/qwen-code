@@ -12060,6 +12060,11 @@ class QwenAgent implements Agent {
         const changed = diffSettingsKeys(oldMerged, newMerged);
         const envChanged =
           envResult.updatedKeys.length > 0 || envResult.removedKeys.length > 0;
+        const providersChanged =
+          changed.has('modelProviders') || changed.has('providerProtocol');
+        if (providersChanged) {
+          this.modelProviderReloadRevision += 1;
+        }
 
         const sessions = [...this.sessions.entries()];
         const refreshed: string[] = [];
@@ -12073,8 +12078,6 @@ class QwenAgent implements Agent {
             }
             const config = session.getConfig();
             const authType = config.getAuthType();
-            const providersChanged =
-              changed.has('modelProviders') || changed.has('providerProtocol');
 
             // Long-lived ACP sessions never restart, so honor providerProtocol
             // changes here too (its requiresRestart only gates the TUI path) and
