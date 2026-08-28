@@ -3786,7 +3786,9 @@ export class DaemonClient {
         }
         return (await res.json()) as DaemonModelDeleteResult;
       },
-      MODEL_PROVIDER_MUTATION_TIMEOUT_MS,
+      this.hasExplicitFetchTimeout
+        ? undefined
+        : MODEL_PROVIDER_MUTATION_TIMEOUT_MS,
     );
   }
 
@@ -5219,7 +5221,9 @@ export class DaemonClient {
         }
         return (await res.json()) as DaemonAuthProviderInstallResult;
       },
-      MODEL_PROVIDER_MUTATION_TIMEOUT_MS,
+      this.hasExplicitFetchTimeout
+        ? undefined
+        : MODEL_PROVIDER_MUTATION_TIMEOUT_MS,
     );
   }
 

@@ -7069,6 +7069,9 @@ describe('runQwenServe runtime startup failures', () => {
           workspaceCwd: tmpDir,
         }),
       ).resolves.toEqual({ status: 'failed' });
+      expect(primaryRuntimeEnv!.effectiveEnv).toBe(capturedRuntimeEnv);
+      expect(capturedRuntimeEnv['QWEN_TEST_RUNTIME_VALUE']).toBe('reloaded');
+      expect(primaryRuntimeEnv!.fallbackReason).toBeUndefined();
 
       await handle.close();
       closed = true;
@@ -7099,6 +7102,7 @@ describe('runQwenServe runtime startup failures', () => {
       sensitiveSpanAttributeMaxLength: 1024 * 1024,
     });
     let runtimeMounted = false;
+    let failEnvFileRead = false;
     vi.spyOn(settingsRuntime, 'loadSettings').mockImplementation(
       (...args: Parameters<typeof settingsRuntime.loadSettings>) => {
         const workspace = args[0];
@@ -7116,7 +7120,9 @@ describe('runQwenServe runtime startup failures', () => {
               [isSecondary
                 ? 'QWEN_TEST_SECONDARY_ENV'
                 : 'QWEN_TEST_PRIMARY_ENV']: runtimeMounted
-                ? 'reloaded'
+                ? failEnvFileRead
+                  ? 'partial'
+                  : 'reloaded'
                 : 'boot',
             },
           },
@@ -7130,6 +7136,24 @@ describe('runQwenServe runtime startup failures', () => {
     vi.spyOn(trustedFoldersRuntime, 'getWorkspaceTrustStatus').mockReturnValue({
       effective: { state: 'trusted' },
     } as ReturnType<typeof trustedFoldersRuntime.getWorkspaceTrustStatus>);
+    const buildRuntimeEnvironmentActual =
+      environmentRuntime.buildRuntimeEnvironment;
+    vi.spyOn(environmentRuntime, 'buildRuntimeEnvironment').mockImplementation(
+      (
+        ...args: Parameters<typeof environmentRuntime.buildRuntimeEnvironment>
+      ) => {
+        const result = buildRuntimeEnvironmentActual(...args);
+        return failEnvFileRead
+          ? {
+              ...result,
+              envFileReadFailed: true,
+              envFileReadFailures: [
+                { path: path.join(secondary, '.env'), error: 'read failed' },
+              ],
+            }
+          : result;
+      },
+    );
     vi.spyOn(acpBridge, 'createAcpSessionBridge')
       .mockReturnValueOnce(
         makeRuntimeBridge() as ReturnType<
@@ -7197,6 +7221,15 @@ describe('runQwenServe runtime startup failures', () => {
         pinnedRuntimeBaseDir,
       );
       expect(env.effectiveEnv?.['QWEN_RUNTIME_DIR']).toBe(pinnedRuntimeBaseDir);
+
+      failEnvFileRead = true;
+      await secondaryRuntime!.workspaceService.reload({
+        route: 'POST /workspace/reload',
+        workspaceCwd: secondary,
+      });
+      expect(env.effectiveEnv?.['QWEN_TEST_SECONDARY_ENV']).toBe('reloaded');
+      expect(env.envFileReadFailed).toBe(false);
+      expect(env.envFileReadFailures).toEqual([]);
     } finally {
       await handle.close();
       if (originalRuntimeDir === undefined) {

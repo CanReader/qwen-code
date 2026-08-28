@@ -5441,6 +5441,12 @@ async function runQwenServeImpl(
           };
         }
         logRuntimeEnvFileReadFailures(workspace, refreshedRuntimeEnv);
+        if (
+          fallbackReason === undefined &&
+          refreshedRuntimeEnv.envFileReadFailed
+        ) {
+          return { ...result, runtimeEnvironmentApplied: false };
+        }
         replaceRuntimeEffectiveEnv(refreshedRuntimeEnv.effectiveEnv);
         if (fallbackReason) {
           primaryRuntimeEnv.fallbackReason = fallbackReason;
@@ -5466,9 +5472,7 @@ async function runQwenServeImpl(
         );
         return {
           ...result,
-          runtimeEnvironmentApplied:
-            fallbackReason === undefined &&
-            !refreshedRuntimeEnv.envFileReadFailed,
+          runtimeEnvironmentApplied: fallbackReason === undefined,
         };
       });
     const workspaceService = runtime.createDaemonWorkspaceService({
@@ -5901,6 +5905,9 @@ async function runQwenServeImpl(
                   secondaryTrusted,
                 );
               logRuntimeEnvFileReadFailures(workspace, refreshedRuntimeEnv);
+              if (refreshedRuntimeEnv.envFileReadFailed) {
+                return { ...result, runtimeEnvironmentApplied: false };
+              }
               secondaryEnv.replace(refreshedRuntimeEnv.effectiveEnv);
               secondaryEnv.metadata.envFileReadFailed =
                 refreshedRuntimeEnv.envFileReadFailed;
@@ -5920,8 +5927,7 @@ async function runQwenServeImpl(
                 ...refreshedRuntimeEnv.envFilePaths,
               );
               delete secondaryEnv.metadata.fallbackReason;
-              runtimeEnvironmentApplied =
-                !refreshedRuntimeEnv.envFileReadFailed;
+              runtimeEnvironmentApplied = true;
             } catch (err) {
               secondaryEnv.metadata.fallbackReason =
                 err instanceof Error ? err.message : String(err);
@@ -6540,6 +6546,9 @@ async function runQwenServeImpl(
                     trusted,
                   );
                 logRuntimeEnvFileReadFailures(workspace, refreshedRuntimeEnv);
+                if (refreshedRuntimeEnv.envFileReadFailed) {
+                  return { ...result, runtimeEnvironmentApplied: false };
+                }
                 wsEnv.replace(refreshedRuntimeEnv.effectiveEnv);
                 wsEnv.metadata.envFileReadFailed =
                   refreshedRuntimeEnv.envFileReadFailed;
@@ -6559,8 +6568,7 @@ async function runQwenServeImpl(
                   ...refreshedRuntimeEnv.envFilePaths,
                 );
                 delete wsEnv.metadata.fallbackReason;
-                runtimeEnvironmentApplied =
-                  !refreshedRuntimeEnv.envFileReadFailed;
+                runtimeEnvironmentApplied = true;
               } catch (err) {
                 wsEnv.metadata.fallbackReason =
                   err instanceof Error ? err.message : String(err);

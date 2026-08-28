@@ -11300,12 +11300,13 @@ export function App({
 
   const handleDeleteModel = useCallback(
     (target: { authType: string; modelId: string; baseUrl?: string }) => {
+      const owner = sessionOwnerGuard.capture();
       const modelActionToken = ++modelActionTokenRef.current;
       setModelActionBusy(true);
       workspaceActions
         .deleteModel(target)
         .then((result) => {
-          if (result?.runtimeSync?.status === 'failed') {
+          if (owner.isCurrent() && result?.runtimeSync?.status === 'failed') {
             store.dispatch([
               {
                 type: 'status',
@@ -11315,7 +11316,7 @@ export function App({
           }
           // A scrubbed fallback requires a restart — surface it like the
           // settings panel does.
-          if (result?.requiresRestart) {
+          if (owner.isCurrent() && result?.requiresRestart) {
             store.dispatch([
               { type: 'status', text: t('settings.requiresRestart') },
             ]);
@@ -11337,6 +11338,7 @@ export function App({
           });
         })
         .catch((error: unknown) => {
+          if (!owner.isCurrent()) return;
           reportError(error, t('settings.models.deleteFailed'));
         })
         .finally(() => {
@@ -11352,6 +11354,7 @@ export function App({
       reloadProviders,
       reloadWorkspaceSettings,
       reportError,
+      sessionOwnerGuard,
       store,
       t,
     ],
