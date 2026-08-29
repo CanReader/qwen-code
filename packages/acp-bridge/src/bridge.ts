@@ -1351,7 +1351,7 @@ function writeServeDebugLine(message: string): void {
   writeStderrLine(`qwen serve debug: ${message}`);
 }
 
-const MAX_DISPLAY_NAME_LENGTH = 256;
+const MAX_DISPLAY_NAME_LENGTH = 200;
 
 /**
  * Upper bound on how many prompt content blocks the bridge echoes per
@@ -10383,8 +10383,15 @@ export function createAcpSessionBridge(opts: BridgeOptions): AcpSessionBridge {
         // loses its manual name in memory and on disk within one tick. The
         // identical-text case is the subset this guard originally covered
         // (#8977).
+        const legacyScheduledTaskTitle =
+          entry.sourceType === 'scheduled_task' &&
+          entry.titleSource === 'manual' &&
+          entry.displayName?.startsWith('⏰ ') &&
+          nextTitleSource === 'auto';
         const manualToAutoDowngrade =
-          entry.titleSource === 'manual' && nextTitleSource === 'auto';
+          entry.titleSource === 'manual' &&
+          nextTitleSource === 'auto' &&
+          !legacyScheduledTaskTitle;
         if (
           (entry.displayName !== nextDisplayName ||
             entry.titleSource !== nextTitleSource) &&
